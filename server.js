@@ -1,22 +1,53 @@
+const readline=require("readline")
 require("dotenv").config();
+const { GoogleGenerativeAI } =require( "@google/generative-ai");
+const genAI=new GoogleGenerativeAI(process.env.API_key);
+const model = genAI.getGenerativeModel({
+  model: "gemini-2.5-flash",
+});
+
 const express= require("express");
+const  http=require("http") //http layer --1
+const {Server}=require("socket.io"); //socket server --2
+
+
+
 const cors=require("cors");
 const bcrypt=require("bcrypt");
-const  http=require("http") //http layer --1
 const path=require("path") //path is required because the server is sending response as the html file
-const {Server}=require("socket.io"); //socket server --2
 const jwt=require("jsonwebtoken")
 
 const app=express();
 app.use(express.static("public"));
-const server=http.createServer(app) //--4
+const server=http.createServer(app) //--4 ippudu same server meed HTTP + WebSocket (socket.io) rendu work avuthayi.
 const io=new Server(server)// --3
 //io connection
-const userSockets = {};
+
+
+
+const userSockets = {}; //nothing but online users
+
+
 io.on("connection" , (socket) =>{
-    socket.on("register" , (userId) =>{ //register class ikkada rasam ante inkoka daggar arasi userid ni obtain cheyyali
-           userSockets[userId] = socket.id; //mapping between mongooseid -> socketid
+ //oka user connect ayyadu
+    socket.on("register" , (userId) =>{ //register class ikkada rasam ante frontend daggara rasi userid ni obtain cheyyali/chesi untamu
+           userSockets[userId] = socket.id; //mapping between mongooseid -> socketid to knew whom to send message ani
+         io.emit("onlineusers" , Object.keys(userSockets)) // userSockets object lo unna anni keys (userIds) ni array ga return chesthundi.
     })
+    socket.on("disconnect" , () =>{
+        //disconnect lo problem enti ante — socket.id telusу, kani userId teliyadu. Anduke reverse ga search chesthunnam
+        const userid=Object.keys(userSockets).find(
+            id =>userSockets[id]==socket.id
+        );
+        //userSockets lo anni keys loop cheyyali
+//aa key ki value (socket.id) current disconnected socket.id ki match avuthundha chuddu
+//match aithe aa userId return cheyyALI
+        if(userid){
+            delete userSockets[userid]
+            io.emit("onlineusers" , Object.keys(userSockets))
+        }
+    })
+
     socket.on("chat message" , async (data) =>{
         console.log("data:", data);                           // data vasthundha?
    console.log("userSockets:", userSockets);             // register ayindha?
@@ -28,6 +59,7 @@ io.on("connection" , (socket) =>{
             text: data.text
         });
         const targetsocket=userSockets[data.ReceiverID] //stores 
+        io.emit("onlineusers", Object.keys(userSockets)); // send chesthunnam frontend ki
         socket.to(targetsocket).emit("chat message" , data) //send message to reciver only
        // socket.emit("chat message" , data) 
     })
@@ -68,7 +100,7 @@ app.get("/" , (req,res) =>{
 //login page
 app.post("/login" , async (req,res) =>{
    const{ email, password }=req.body;
-   const JWT_SECRET_TOKEN="thisisthesecrettoken";
+   const JWT_SECRET_TOKEN=process.env.JWT_SECRET;
       if(!email || !password)  return res.json({ success:false, msg:"Fill all fields" });
         try{
           const user=await Users.findOne({email});
@@ -84,7 +116,8 @@ app.post("/login" , async (req,res) =>{
                   name: user.name
                };
 
-           //creating token before sending the response because if we send this after response ,when there is any error found in that then catch will raise it will also send one response to server , server cannot take  2 responses
+           //creating token before sending the response because if we send this after response ,when there is any error found in that ,
+           // then catch will raise it will also send one response to server , server cannot take  2 responses
       const token=jwt.sign(payload,process.env.JWT_SECRET,{expiresIn : "1h"});
      // console.log("token" , token)// to check the token first
      // const decodedversion=jwt.verify(token,JWT_SECRET_TOKEN); //for testing uss this in middleware
@@ -106,8 +139,8 @@ if(!bearertoken || !bearertoken.startsWith("bearer ")) return res.send("bearerto
 const token=bearertoken.split(" ")[1];
 try{
 const decoded=jwt.verify(token , process.env.JWT_SECRET)
-req.user=decoded;
-next();
+req.user=decoded; //data decoded
+next(); //ipdu actual route run avthundhi
 }
 catch(err){   return res.status(401).send("Invalid token");}
 }
@@ -136,7 +169,29 @@ app.post("/signup" ,async (req,res) => {
         console.log("error occured" , err)
     }
 })
+//ai assistant
 
+app.post("/ai-chat", async (req,res) =>{
+    try{
+        const {message} = req.body;
+        if(!message){
+            return res.status(400).json({error : "message is required"});
+        }
+        const chat=model.startChat();
+        const result = await chat.sendMessage(message); //msg ni model ki pampisthunnam
+        const response=await result.response;
+        const text=await response.text();
+
+        res.json({
+            reply : text,
+        })
+    } catch(err){
+        console.log(err);
+         res.status(500).json({
+      error: "Failed to generate AI response",
+    });
+    }
+});
 //messages
 app.get("/messages" ,auth ,  async (req,res) =>{
      const { with: otherId } = req.query;
@@ -155,6 +210,8 @@ app.get("/users",auth , async (req, res) => {
     const users = await Users.find({}, "name email")  // from DB
     res.json(users)
 })
+
+
 app.post("/" , (req,res) => {
     console.log("server started")
 })

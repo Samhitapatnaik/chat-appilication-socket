@@ -381,6 +381,10 @@
             height: 40px;
             margin-bottom: 6px;
         }
+        /* AI Assistant contact */
+.ai-avatar {
+    background: linear-gradient(135deg, #7c3aed, #a855f7);
+}
         @keyframes shimmer {
             0% { background-position: 200% 0; }
             100% { background-position: -200% 0; }
@@ -463,11 +467,11 @@ if(!token){
 <script src="/socket.io/socket.io.js"></script>
 
 <script>
-    // ── Socket connection ──
+    // Socket connection
     const socket = io("http://localhost:3000");
 
     socket.on("connect", () => {
-       // console.log("🟢 connected:", socket.id);
+       // console.log(" connected:", socket.id);
         const userId=sessionStorage.getItem("userId");
         socket.emit("register" , userId) //idhi server lo recieve cheskuntam
 
@@ -489,11 +493,13 @@ if(!token){
 
     // ── State ──
     let allUsers = [];
+    let onlineusers=[];
     let activeUser = null;
     const loggedInName = sessionStorage.getItem("chatuser") ;
     document.getElementById("loggedInUser").textContent = loggedInName;
 
-    // ── Load users from backend ──
+     
+    //Load users from backend
     async function loadUsers() {
         try {
           const res = await fetch("/users", {
@@ -502,7 +508,7 @@ if(!token){
             const users = await res.json();
             //console.log( loggedInName)
             const filteredusers=users.filter(user =>{
-              return  user.name!==loggedInName
+              return user._id !== sessionStorage.getItem("userId")
             });
          //   console.log("users" , users);
             //console.log(filteredusers);
@@ -515,25 +521,36 @@ if(!token){
     }
 
     // ── Render contacts ──
-    function renderContacts(filteredusers) {
-        const list = document.getElementById("contactsList");
-        if (!filteredusers.length) {
-            list.innerHTML = `<p >No users found</p>`;
-            return;
-        }
-        list.innerHTML = filteredusers.map(u => `
-            <div class="contact-item" id="contact-${u._id}" onclick="openChat('${u._id}', '${u.name}', '${u.email}')">
-                <div class="avatar"> 
-                    ${u.name.charAt(0).toUpperCase()}
-                    <div class="online-dot"></div>
-                </div>
-                <div class="contact-info">
-                    <div class="contact-name">${u.name}</div>
-                  
-                </div>
-            </div>
-        `).join('');
+  function renderContacts(filteredusers) {
+    const list = document.getElementById("contactsList");
+    if (!filteredusers.length) {
+        list.innerHTML = `<p>No users found</p>`;
+        return;
     }
+
+    // AI contact always first lo untundhi
+    const aiContact = `
+        <div class="contact-item" id="contact-ai" onclick="openChat('ai', '🤖 AI Assistant', '')">
+            <div class="avatar ai-avatar">AI</div>
+            <div class="contact-info">
+                <div class="contact-name"> AI Assistant</div>
+                <div class="contact-preview">Powered by Gemini</div>
+            </div>
+        </div>
+    `;
+
+    list.innerHTML = aiContact + filteredusers.map(u => `
+        <div class="contact-item" id="contact-${u._id}" onclick="openChat('${u._id}', '${u.name}', '${u.email}')">
+            <div class="avatar">
+                ${u.name.charAt(0).toUpperCase()}
+                <div class="online-dot"></div>
+            </div>
+            <div class="contact-info">
+                <div class="contact-name">${u.name}</div>
+            </div>
+        </div>
+    `).join('');
+}
 
     // ── Filter contacts ──
     function filterContacts(query) {
@@ -555,7 +572,10 @@ if(!token){
         // update chat topbar
         document.getElementById("chatAvatar").textContent = name.charAt(0).toUpperCase();
         document.getElementById("chatName").textContent = name;
-        document.getElementById("chatStatus").textContent = "● Online";
+        document.getElementById("chatStatus").textContent = 
+    id === 'ai' ? "● Gemini Powered" : "● Online";
+        
+       // document.getElementById("chatStatus").textContent = "● Online";
 
         // show chat, hide empty state
         document.getElementById("emptyState").style.display = "none";
@@ -601,9 +621,16 @@ if(!token){
         if (!text || !activeUser) return;
     //    console.log("activeUser at send time:", activeUser._id); 
  const senderID = sessionStorage.getItem("userId");
+ //ai aite diiferent path
+     if(activeUser._id==='ai'){
+        appendMessage(text,"sent"); //ui lo show cheyyali
+        input.value="";
+        sendAIMessage(text); //AI route
+        return; //it is mandatory because idhi lekapote next socket.emit run aipothundhi
+     }
         // show in UI
         appendMessage(text, "sent");
-     //  const senderID = sessionStorage.getItem("userId");
+      //senderID = sessionStorage.getItem("userId");
      // console.log(senderID)
         // emit to server
         socket.emit("chat message", {
@@ -614,6 +641,30 @@ if(!token){
         input.value = "";
     }
 
+    async function sendAIMessage(text) {
+    // typing indicator
+    const area = document.getElementById("messagesArea");
+    const typing = document.createElement("div");
+    typing.className = "msg-row received";
+    typing.id = "typing-indicator";
+    typing.innerHTML = `<div class="msg-bubble" style="color:var(--muted)">thinking...</div>`;
+    area.appendChild(typing);
+    area.scrollTop = area.scrollHeight;
+
+    try {
+        const res = await fetch("/ai-chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: text })
+        });
+        const data = await res.json();
+        document.getElementById("typing-indicator")?.remove();
+        appendMessage(data.reply, "received");
+    } catch (err) {
+        document.getElementById("typing-indicator")?.remove();
+        appendMessage("try again!", "received");
+    }
+}
     // ── Enter key to send ──
     function handleKey(e) {
         if (e.key === "Enter") sendMessage();
