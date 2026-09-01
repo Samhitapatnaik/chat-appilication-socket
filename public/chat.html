@@ -389,6 +389,83 @@
             0% { background-position: 200% 0; }
             100% { background-position: -200% 0; }
         }
+
+.notification{
+    position:fixed;
+    top:20px;
+    right:20px;
+    width:280px;
+    background:#1b1b1b;
+    border:1px solid #2a2a2a;
+    border-left:5px solid var(--accent);
+    border-radius:12px;
+    padding:15px;
+    box-shadow:0 10px 30px rgba(0,0,0,.4);
+    display:none;
+    z-index:9999;
+    animation:slideIn .3s ease;
+}
+
+.notify-title{
+    font-weight:bold;
+    color:white;
+    margin-bottom:8px;
+}
+
+.notify-sender{
+    color:var(--accent);
+    font-weight:600;
+    margin-bottom:4px;
+}
+
+.notify-text{
+    color:#ccc;
+    font-size:14px;
+}
+
+.contact-header{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.contact-footer{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 4px;
+}
+
+.contact-time{
+    font-size: 12px;
+    color: #999;
+}
+
+.unread-count{
+    min-width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #25D366;
+    color: white;
+    font-size: 12px;
+    font-weight: bold;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+@keyframes slideIn{
+    from{
+        transform:translateX(100%);
+        opacity:0;
+    }
+    to{
+        transform:translateX(0);
+        opacity:1;
+    }
+}
+
     </style>
 </head>
 <body>
@@ -454,10 +531,19 @@
             </div>
         </div>
 
+<!-- Notification -->
+<div id="notification" class="notification">
+    <div class="notify-title">🔔 New Message</div>
+    <div id="notifySender" class="notify-sender"></div>
+    <div id="notifyText" class="notify-text"></div>
+</div>
+
     </div>
 </div>
 <script>
 const token = sessionStorage.getItem("token");
+
+
 
 if(!token){
     window.location.href = "/";
@@ -475,25 +561,52 @@ if(!token){
         const userId=sessionStorage.getItem("userId");
         socket.emit("register" , userId) //idhi server lo recieve cheskuntam
 
-       // console.log(userId);
     });
 
-    socket.on("chat message", (data) => {
-  //   console.log("data.senderID:  ", JSON.stringify(data.senderID))
-   // console.log("activeUser._id: ", JSON.stringify(activeUser?._id))
-   //  console.log("match?", data.senderID === activeUser?._id)
-   console.log("recieved data" ,data)
-        if (data.senderID === activeUser?._id) {
-             console.log("MATCH! appending...") 
-            appendMessage(data.text, "received");
+    socket.on("onlineusers" , (users) =>{
+        onlineUsers=users;
+
+        const filteredUsers=allUsers.filter(user =>{
+            return user._id!==sessionStorage.getItem("userId");
+        });
+
+        renderContacts(filteredUsers)
+    })
+             
+   socket.on("chat message", (data) => {
+
+    const sender = allUsers.find(user => user._id === data.senderID);
+
+    if (sender) {
+        sender.lastMessageTime = new Date();
+        sender.lastMessage = data.text;
+
+        if (data.senderID !== activeUser?._id) {
+            sender.unreadCount++;
         }
-        
-        
+    }
+
+    allUsers.sort((a, b) => {
+        return b.lastMessageTime - a.lastMessageTime;
     });
 
+    const filteredUsers = allUsers.filter(user => {
+        return user._id !== sessionStorage.getItem("userId");
+    });
+
+    renderContacts(filteredUsers);
+
+    if (data.senderID === activeUser?._id) {
+        appendMessage(data.text, "received");
+    } else {
+        if (sender) {
+            showNotification(sender, data.text);
+        }
+    }
+});
     // ── State ──
     let allUsers = [];
-    let onlineusers=[];
+    let onlineUsers=[];
     let activeUser = null;
     const loggedInName = sessionStorage.getItem("chatuser") ;
     document.getElementById("loggedInUser").textContent = loggedInName;
@@ -506,13 +619,17 @@ if(!token){
     headers: { "authorization": "bearer " + token }
 });
             const users = await res.json();
-            //console.log( loggedInName)
-            const filteredusers=users.filter(user =>{
+         
+             allUsers = users.map(user =>({
+                ...user,
+                lastMessageTime:0,
+                unreadCount:0
+            }));
+// in filtered users login contact will not be there
+            const filteredusers=allUsers.filter(user =>{
               return user._id !== sessionStorage.getItem("userId")
             });
-         //   console.log("users" , users);
-            //console.log(filteredusers);
-            allUsers = filteredusers;
+
             renderContacts(filteredusers);
         } catch (err) {
             document.getElementById("contactsList").innerHTML =
@@ -521,33 +638,78 @@ if(!token){
     }
 
     // ── Render contacts ──
-  function renderContacts(filteredusers) {
+ function renderContacts(filteredusers) {
     const list = document.getElementById("contactsList");
+
     if (!filteredusers.length) {
         list.innerHTML = `<p>No users found</p>`;
         return;
     }
 
-    // AI contact always first lo untundhi
+    // AI Contact
     const aiContact = `
-        <div class="contact-item" id="contact-ai" onclick="openChat('ai', '🤖 AI Assistant', '')">
+        <div class="contact-item" id="contact-ai"
+             onclick="openChat('ai', '🤖 AI Assistant', '')">
+
             <div class="avatar ai-avatar">AI</div>
+
             <div class="contact-info">
-                <div class="contact-name"> AI Assistant</div>
-                <div class="contact-preview">Powered by Gemini</div>
+                <div class="contact-name">AI Assistant</div>
+                <div class="contact-preview">
+                    Powered by Gemini
+                </div>
             </div>
+
         </div>
     `;
 
-    list.innerHTML = aiContact + filteredusers.map(u => `
-        <div class="contact-item" id="contact-${u._id}" onclick="openChat('${u._id}', '${u.name}', '${u.email}')">
+    list.innerHTML =
+        aiContact +
+        filteredusers.map(u => `
+        <div class="contact-item"
+             id="contact-${u._id}"
+             onclick="openChat('${u._id}', '${u.name}', '${u.email}')">
+
             <div class="avatar">
                 ${u.name.charAt(0).toUpperCase()}
-                <div class="online-dot"></div>
+              ${onlineUsers.includes(u._id)
+    ? `<div class="online-dot"> </div>`
+    : ""} 
             </div>
+
             <div class="contact-info">
-                <div class="contact-name">${u.name}</div>
+
+                <div class="contact-header">
+
+                    <div class="contact-name">
+                        ${u.name}
+                    </div>
+
+                    <div class="contact-time">
+                        ${u.lastMessageTime
+                            ? new Date(u.lastMessageTime).toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit"
+                              })
+                            : ""}
+                    </div>
+
+                </div>
+
+           <div class="contact-footer">
+
+    <div class="contact-preview">
+        ${u.lastMessage || ""}
+    </div>
+
+    ${u.unreadCount > 0
+        ? `<div class="unread-count">${u.unreadCount}</div>`
+        : ""}
+
+</div>
+
             </div>
+
         </div>
     `).join('');
 }
@@ -568,6 +730,21 @@ if(!token){
         document.getElementById(`contact-${id}`)?.classList.add("active");
 
         activeUser = { _id: id, name, email }; 
+
+        const user=allUsers.find(u =>u._id===id);
+
+        if(user){
+            user.unreadCount=0;
+  const filteredUsers = allUsers.filter(u => {
+        return u._id !== sessionStorage.getItem("userId");
+    });
+
+    renderContacts(filteredUsers);
+
+    // Keep the selected contact highlighted
+    document.getElementById(`contact-${id}`)?.classList.add("active");
+}
+        
 
         // update chat topbar
         document.getElementById("chatAvatar").textContent = name.charAt(0).toUpperCase();
@@ -614,13 +791,35 @@ if(!token){
         area.scrollTop = area.scrollHeight;
     }
 
-    // ── Send message ──
+    function showNotification(sender,message){
+        const box=document.getElementById("notification");
+        document.getElementById("notifySender").innerText=sender.name;
+        document.getElementById("notifyText").innerText=message;
+
+        box.style.display="block";
+
+        box.onclick = () =>{
+            openChat(
+                sender._id,
+                sender.name,
+                sender.email
+            );
+
+             box.style.display = "none";
+        }
+
+        setTimeout(() =>{
+            box.style.display="none";
+        } ,3000)
+
+    }
+
+  
     function sendMessage() {
         const input = document.getElementById("msgInput");
         const text = input.value.trim();
         if (!text || !activeUser) return;
-    //    console.log("activeUser at send time:", activeUser._id); 
- const senderID = sessionStorage.getItem("userId");
+    
  //ai aite diiferent path
      if(activeUser._id==='ai'){
         appendMessage(text,"sent"); //ui lo show cheyyali
@@ -628,13 +827,34 @@ if(!token){
         sendAIMessage(text); //AI route
         return; //it is mandatory because idhi lekapote next socket.emit run aipothundhi
      }
-        // show in UI
+       
         appendMessage(text, "sent");
-      //senderID = sessionStorage.getItem("userId");
-     // console.log(senderID)
-        // emit to server
+
+        const reciever=allUsers.find(user =>user._id ===activeUser._id)
+
+        if(reciever){
+             reciever.lastMessageTime = new Date();
+              reciever.lastMessage = "You: " + text;
+        }
+     
+        allUsers.sort((a,b) =>{
+            return b.lastMessageTime - a.lastMessageTime;
+        })
+
+        const filteredUsers=allUsers.filter( user =>{
+            return user._id!==sessionStorage.getItem("userId");
+        })
+
+        renderContacts(filteredUsers);
+
+        if (activeUser) {
+    document
+        .getElementById(`contact-${activeUser._id}`)
+        ?.classList.add("active");
+}
+
         socket.emit("chat message", {
-           senderID: senderID,
+          senderID: sessionStorage.getItem("userId"),
            ReceiverID: activeUser._id, //activeuser means clicked user simple he is a reciever
            text:text
         });
@@ -678,6 +898,7 @@ if(!token){
 
     // ── Init ──
     loadUsers();
+
 </script>
 </body>
 </html>

@@ -111,20 +111,20 @@ app.post("/login" , async (req,res) =>{
           if(!match) return res.json({ success:false, msg:"Wrong password" });
         
           const payload = { //payload anedhi data ni store chesthundhi
-                   
+                    userId: user._id.toString(),
                      email: user.email,
                   name: user.name
                };
 
            //creating token before sending the response because if we send this after response ,when there is any error found in that ,
            // then catch will raise it will also send one response to server , server cannot take  2 responses
-      const token=jwt.sign(payload,process.env.JWT_SECRET,{expiresIn : "1h"});
-     // console.log("token" , token)// to check the token first
-     // const decodedversion=jwt.verify(token,JWT_SECRET_TOKEN); //for testing uss this in middleware
-     // console.log("DECODED VERSION " , decodedversion) //here you will get the details of the payload
-
+      const token=jwt.sign(
+        payload,
+        process.env.JWT_SECRET,
+        {expiresIn : "1h"});
+     
        res.json({success:true , name:user.name , userId:user._id.toString(),token}) 
-      // console.log("userid" ,userid)
+
 
     }
     catch(err){
@@ -137,17 +137,21 @@ let bearertoken=req.headers.authorization;
 //console.log("bearertoken" , bearertoken);
 if(!bearertoken || !bearertoken.startsWith("bearer ")) return res.send("bearertoken is missing!YOU ARE UNAUTHORIZED")
 const token=bearertoken.split(" ")[1];
+
 try{
 const decoded=jwt.verify(token , process.env.JWT_SECRET)
 req.user=decoded; //data decoded
 next(); //ipdu actual route run avthundhi
 }
+
 catch(err){   return res.status(401).send("Invalid token");}
 }
 /* app.get("/chat.html"  ,(req,res)=>{
     res.sendFile(path.join(__dirname,"public" , "chat.html"))
 })  */
 //middleware 
+
+
 //signup
 app.post("/signup" ,async (req,res) => {
     const {name,email,password}=req.body;
@@ -173,6 +177,7 @@ app.post("/signup" ,async (req,res) => {
 
 app.post("/ai-chat", async (req,res) =>{
     try{
+        console.log("Request body:", req.body); // debug line
         const {message} = req.body;
         if(!message){
             return res.status(400).json({error : "message is required"});
@@ -207,7 +212,26 @@ app.get("/messages" ,auth ,  async (req,res) =>{
 
 //users
 app.get("/users",auth , async (req, res) => {
-    const users = await Users.find({}, "name email")  // from DB
+    const users = await Users.find({}, "name email").lean();  // from DB
+ //   console.log("logged user:", req.user.userId);
+    for(const user of users) {
+        const lastMessage=await Message.findOne({
+            $or :[
+                {
+                    senderID : req.user.userId,
+                    ReceiverID: user._id.toString()
+                },
+                {
+                    senderID: user._id.toString(),
+                     ReceiverID: req.user.userId
+
+                }
+            ]
+        }).sort({timestamp :-1});
+        user.lastMessage = lastMessage ? lastMessage.text : "";
+        
+    }
+    
     res.json(users)
 })
 
