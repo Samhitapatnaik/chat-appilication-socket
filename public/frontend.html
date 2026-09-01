@@ -221,7 +221,7 @@
 </div>
  <script src="/socket.io/socket.io.js"> </script>
  <script>
-    const socket=io("http://localhost:3000");
+    const socket=io();
     socket.on("connect" , () =>{
           console.log("connected" , socket.id);
     })
@@ -254,7 +254,7 @@
         if (!email || !password) return  showMsg('loginMsg', 'Fill in all fields!', 'error')
  
         try {
-            const res  = await fetch('http://localhost:3000/login', {
+            const res  = await fetch("/login", {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email, password })
@@ -289,7 +289,7 @@
         if (!name || !email || !password) return showMsg('signupMsg', 'Fill in all fields!', 'error');
  
         try {
-            const res  = await fetch('http://localhost:3000/signup', {
+            const res  = await fetch("/signup", {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name, email, password })
